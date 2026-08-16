@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ciStatusLabel } from "@/components/ci-status";
 import type { PipelineStageKey, PipelineStory, Proposal, StoryDetail } from "@/lib/api";
-import { reviewablePullRequests, storyHref, storyOwner } from "@/lib/pipeline";
+import { boardHref, ownedBy, reviewablePullRequests, storyHref, storyOwner } from "@/lib/pipeline";
 import { deriveStoryTimeline, proposalsForStory } from "@/lib/story";
 
 describe("story presentation contract", () => {
@@ -310,6 +310,44 @@ describe("story presentation contract", () => {
     ];
 
     expect(reviewablePullRequests([story]).map(({ pull }) => pull.number)).toEqual([22]);
+  });
+
+  it("never counts a story as owned when the viewer has no GitHub login", () => {
+    expect(ownedBy(["alice"], undefined)).toBe(false);
+    expect(ownedBy([], undefined)).toBe(false);
+  });
+
+  it("matches an assignee to the viewer's login regardless of case", () => {
+    expect(ownedBy(["Alice"], "alice")).toBe(true);
+  });
+
+  it("finds no owner in an empty assignee list", () => {
+    expect(ownedBy([], "alice")).toBe(false);
+  });
+
+  it("does not match an assignee who isn't the viewer", () => {
+    expect(ownedBy(["bob"], "alice")).toBe(false);
+  });
+
+  it("builds a mine-only board link with no other filters", () => {
+    expect(boardHref("project-1", { mine: true })).toBe("/projects/project-1/stories?mine=1");
+  });
+
+  it("combines the stage and mine filters in one board link", () => {
+    expect(boardHref("project-1", { stage: "backlog", mine: true })).toBe(
+      "/projects/project-1/stories?stage=backlog&mine=1",
+    );
+  });
+
+  it("omits the mine key entirely when mine is off", () => {
+    expect(boardHref("project-1", { mine: false })).toBe("/projects/project-1/stories");
+  });
+
+  it("keeps mine on when the all chip clears the stage", () => {
+    expect(boardHref("project-1", { stage: "backlog", status: "ready_to_plan", mine: true })).toBe(
+      "/projects/project-1/stories?stage=backlog&status=ready_to_plan&mine=1",
+    );
+    expect(boardHref("project-1", { mine: true })).toBe("/projects/project-1/stories?mine=1");
   });
 });
 

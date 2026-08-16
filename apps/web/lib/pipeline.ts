@@ -104,6 +104,29 @@ export function storyHref(
   return `/projects/${projectId}/stories/${story.number}?${storyQuery(story)}`;
 }
 
+export type BoardFilter = {
+  stage?: PipelineStageKey | null;
+  status?: PipelineStageState | null;
+  mine?: boolean;
+};
+
+/** The stories board URL for a given combination of filter chips. */
+export function boardHref(projectId: string, filter: BoardFilter = {}) {
+  const params = new URLSearchParams();
+  if (filter.stage) params.set("stage", filter.stage);
+  if (filter.status) params.set("status", filter.status);
+  if (filter.mine) params.set("mine", "1");
+  const query = params.toString();
+  return `/projects/${projectId}/stories${query ? `?${query}` : ""}`;
+}
+
+/** Whether a story's assignees include the signed-in viewer, by GitHub login. */
+export function ownedBy(assignees: string[], login: string | undefined): boolean {
+  if (!login) return false;
+  const target = login.toLowerCase();
+  return assignees.some((assignee) => assignee.toLowerCase() === target);
+}
+
 export type StoryOwner = { login: string; extra: number };
 
 /** The story's lead assignee, GitHub-ordered, with a count of the rest. */
