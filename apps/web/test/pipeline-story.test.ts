@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ciStatusLabel } from "@/components/ci-status";
 import type { PipelineStageKey, PipelineStory, Proposal, StoryDetail } from "@/lib/api";
-import { reviewablePullRequests, storyHref } from "@/lib/pipeline";
+import { reviewablePullRequests, storyHref, storyOwner } from "@/lib/pipeline";
 import { deriveStoryTimeline, proposalsForStory } from "@/lib/story";
 
 describe("story presentation contract", () => {
@@ -275,6 +275,30 @@ describe("story presentation contract", () => {
     } as unknown as Proposal;
 
     expect(proposalsForStory([linked, unrelated], detail, false)).toEqual([linked]);
+  });
+
+  it("names no owner for an unassigned story", () => {
+    expect(storyOwner([])).toBeNull();
+  });
+
+  it("names the sole assignee with nothing left over", () => {
+    expect(storyOwner(["a"])).toEqual({ login: "a", extra: 0 });
+  });
+
+  it("counts the remaining assignees past the first", () => {
+    expect(storyOwner(["a", "b", "c"])).toEqual({ login: "a", extra: 2 });
+  });
+
+  it("keeps GitHub's assignee order rather than sorting it", () => {
+    expect(storyOwner(["zoe", "adam"])).toEqual({ login: "zoe", extra: 1 });
+  });
+
+  it("drops empty and blank assignees before naming an owner", () => {
+    expect(storyOwner(["", " ", "a"])).toEqual({ login: "a", extra: 0 });
+  });
+
+  it("trims whitespace around an assignee's login", () => {
+    expect(storyOwner(["  a  "])).toEqual({ login: "a", extra: 0 });
   });
 
   it("does not count draft pull requests as waiting for human review", () => {

@@ -104,6 +104,16 @@ export function storyHref(
   return `/projects/${projectId}/stories/${story.number}?${storyQuery(story)}`;
 }
 
+export type StoryOwner = { login: string; extra: number };
+
+/** The story's lead assignee, GitHub-ordered, with a count of the rest. */
+export function storyOwner(assignees: string[]): StoryOwner | null {
+  const logins = assignees.map((login) => login.trim()).filter(Boolean);
+  const [login] = logins;
+  if (!login) return null;
+  return { login, extra: logins.length - 1 };
+}
+
 export function pipelineStories(pipeline: Pipeline): PipelineStory[] {
   return pipeline.stages.flatMap((stage) => stage.stories);
 }
