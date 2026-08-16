@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { ciStatusLabel } from "@/components/ci-status";
 import type { PipelineStageKey, PipelineStory, Proposal, StoryDetail } from "@/lib/api";
-import { boardHref, ownedBy, reviewablePullRequests, storyHref, storyOwner } from "@/lib/pipeline";
+import {
+  boardHref,
+  mineFilterOn,
+  ownedBy,
+  reviewablePullRequests,
+  storyHref,
+  storyOwner,
+} from "@/lib/pipeline";
 import { deriveStoryTimeline, proposalsForStory } from "@/lib/story";
 
 describe("story presentation contract", () => {
@@ -348,6 +355,22 @@ describe("story presentation contract", () => {
       "/projects/project-1/stories?stage=backlog&status=ready_to_plan&mine=1",
     );
     expect(boardHref("project-1", { mine: true })).toBe("/projects/project-1/stories?mine=1");
+  });
+
+  it("turns the mine filter on only when the viewer has a GitHub login to match against", () => {
+    expect(mineFilterOn("1", "alice")).toBe(true);
+    expect(mineFilterOn("1", undefined)).toBe(false);
+    expect(mineFilterOn(undefined, "alice")).toBe(false);
+    expect(mineFilterOn(undefined, undefined)).toBe(false);
+  });
+
+  it("recovers a login-less viewer who arrives with ?mine=1 already in the URL", () => {
+    // A shared link, bookmark, or browser history can carry `mine=1` for a
+    // viewer with no GitHub login. The derived flag must stay off so the
+    // board renders normally and the all chip offers a clean way out.
+    const mineOn = mineFilterOn("1", undefined);
+    expect(mineOn).toBe(false);
+    expect(boardHref("project-1", { mine: mineOn })).toBe("/projects/project-1/stories");
   });
 });
 

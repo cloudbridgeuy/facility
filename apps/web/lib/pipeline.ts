@@ -127,6 +127,17 @@ export function ownedBy(assignees: string[], login: string | undefined): boolean
   return assignees.some((assignee) => assignee.toLowerCase() === target);
 }
 
+/**
+ * Whether the mine filter should actually apply. It is inert — never on —
+ * for a viewer with no GitHub login to match against, even if `?mine=1`
+ * is already sitting in the URL (a shared link, a bookmark, browser
+ * history), so such a viewer is never trapped on a board with every
+ * story filtered out and no chip left to undo it.
+ */
+export function mineFilterOn(mine: string | undefined, login: string | undefined): boolean {
+  return mine === "1" && Boolean(login);
+}
+
 export type StoryOwner = { login: string; extra: number };
 
 /** The story's lead assignee, GitHub-ordered, with a count of the rest. */

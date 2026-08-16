@@ -8,7 +8,13 @@ import { StageSection } from "@/components/project/stage-section";
 import { LiveRefresh } from "@/components/shell/live-refresh";
 import { api } from "@/lib/api";
 import type { PipelineStageKey, PipelineStageKind, PipelineStageState } from "@/lib/pipeline";
-import { boardHref, ownedBy, pipelineStageStateLabel, pipelineStories } from "@/lib/pipeline";
+import {
+  boardHref,
+  mineFilterOn,
+  ownedBy,
+  pipelineStageStateLabel,
+  pipelineStories,
+} from "@/lib/pipeline";
 
 export const metadata = { title: "stories" };
 
@@ -46,7 +52,7 @@ export default async function ProjectStoriesPage({
   const canTrigger = hasPermission(permissions, "runs:trigger");
   const canSync = hasPermission(permissions, "repos:write");
   const viewerLogin = me.ok ? me.data.principal.githubLogin : undefined;
-  const mineOn = mine === "1";
+  const mineOn = mineFilterOn(mine, viewerLogin);
   const stages = pipelineResult.ok ? pipelineResult.data.stages : [];
   const stageKeys = new Set(stages.map((candidate) => candidate.key));
   const activeStage =
