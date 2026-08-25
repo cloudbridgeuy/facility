@@ -3,7 +3,7 @@ import { ciStatusLabel } from "@/components/ci-status";
 import type { PipelineStageKey, PipelineStory, Proposal, StoryDetail } from "@/lib/api";
 import {
   boardHref,
-  mineFilterOn,
+  mineFilterState,
   ownedBy,
   reviewablePullRequests,
   storyHref,
@@ -358,19 +358,42 @@ describe("story presentation contract", () => {
   });
 
   it("turns the mine filter on only when the viewer has a GitHub login to match against", () => {
-    expect(mineFilterOn("1", "alice")).toBe(true);
-    expect(mineFilterOn("1", undefined)).toBe(false);
-    expect(mineFilterOn(undefined, "alice")).toBe(false);
-    expect(mineFilterOn(undefined, undefined)).toBe(false);
+    expect(mineFilterState("1", { ok: true, githubLogin: "alice" })).toEqual({
+      kind: "on",
+      login: "alice",
+    });
+    expect(mineFilterState("1", { ok: true, githubLogin: undefined })).toEqual({ kind: "off" });
+    expect(mineFilterState(undefined, { ok: true, githubLogin: "alice" })).toEqual({ kind: "off" });
+    expect(mineFilterState(undefined, { ok: true, githubLogin: undefined })).toEqual({
+      kind: "off",
+    });
   });
 
   it("recovers a login-less viewer who arrives with ?mine=1 already in the URL", () => {
     // A shared link, bookmark, or browser history can carry `mine=1` for a
-    // viewer with no GitHub login. The derived flag must stay off so the
+    // viewer with no GitHub identity. The derived state must stay off so the
     // board renders normally and the all chip offers a clean way out.
-    const mineOn = mineFilterOn("1", undefined);
-    expect(mineOn).toBe(false);
-    expect(boardHref("project-1", { mine: mineOn })).toBe("/projects/project-1/stories");
+    const state = mineFilterState("1", { ok: true, githubLogin: undefined });
+    expect(state).toEqual({ kind: "off" });
+    expect(boardHref("project-1", { mine: state.kind === "on" })).toBe(
+      "/projects/project-1/stories",
+    );
+  });
+
+  it("reports a failed /v1/me as blocked rather than as a filter that found nothing", () => {
+    // Regression: a partial failure (pipeline loads, identity request fails)
+    // used to be collapsed into "no login", which silently showed every story
+    // under `?mine=1` while removing the chip that could undo it. The board
+    // must surface the failure instead.
+    const state = mineFilterState("1", { ok: false, message: "identity lookup timed out" });
+    expect(state).toEqual({ kind: "blocked", reason: "identity lookup timed out" });
+    expect(boardHref("project-1", { mine: state.kind === "on" })).toBe(
+      "/projects/project-1/stories",
+    );
+  });
+
+  it("keeps an unrequested mine filter off even when the identity request failed", () => {
+    expect(mineFilterState(undefined, { ok: false, message: "down" })).toEqual({ kind: "off" });
   });
 });
 

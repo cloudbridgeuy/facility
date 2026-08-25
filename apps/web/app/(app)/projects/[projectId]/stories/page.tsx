@@ -10,7 +10,8 @@ import { api } from "@/lib/api";
 import type { PipelineStageKey, PipelineStageKind, PipelineStageState } from "@/lib/pipeline";
 import {
   boardHref,
-  mineFilterOn,
+  type MeOutcome,
+  mineFilterState,
   ownedBy,
   pipelineStageStateLabel,
   pipelineStories,
@@ -44,15 +45,21 @@ export default async function ProjectStoriesPage({
   searchParams: Promise<{ stage?: string; status?: string; mine?: string }>;
 }) {
   const [{ projectId }, { stage, status, mine }] = await Promise.all([params, searchParams]);
-  const [pipelineResult, me] = await Promise.all([api.pipeline(projectId), api.me()]);
+  const [pipelineResult, meResult] = await Promise.all([api.pipeline(projectId), api.me()]);
 
   if (!pipelineResult.ok && pipelineResult.offline) return <Offline />;
 
-  const permissions = me.ok ? me.data.permissions : [];
+  // The identity request is allowed to fail independently of the pipeline: a
+  // partial failure must not silently downgrade `?mine=1` into "show
+  // everything", so the outcome — not just the login — feeds the filter.
+  const me: MeOutcome = meResult.ok
+    ? { ok: true, githubLogin: meResult.data.principal.githubLogin }
+    : { ok: false, message: meResult.message };
+  const permissions = me.ok && meResult.ok ? meResult.data.permissions : [];
   const canTrigger = hasPermission(permissions, "runs:trigger");
   const canSync = hasPermission(permissions, "repos:write");
-  const viewerLogin = me.ok ? me.data.principal.githubLogin : undefined;
-  const mineOn = mineFilterOn(mine, viewerLogin);
+  const viewerLogin = me.ok ? me.githubLogin : undefined;
+  const mineState = mineFilterState(mine, me);
   const stages = pipelineResult.ok ? pipelineResult.data.stages : [];
   const stageKeys = new Set(stages.map((candidate) => candidate.key));
   const activeStage =
@@ -65,13 +72,16 @@ export default async function ProjectStoriesPage({
     activeStage && status && stageStates.has(status as PipelineStageState)
       ? (status as PipelineStageState)
       : null;
-  const scoped = mineOn
-    ? stages.map((s) => ({
-        ...s,
-        stories: s.stories.filter((story) => ownedBy(story.assignees, viewerLogin)),
-      }))
-    : stages;
+  const scoped =
+    mineState.kind === "on"
+      ? stages.map((s) => ({
+          ...s,
+          stories: s.stories.filter((story) => ownedBy(story.assignees, mineState.login)),
+        }))
+      : stages;
+  const mineOn = mineState.kind === "on";
   const counts = [...scoped].reverse();
+  const scopedTotal = scoped.reduce((total, s) => total + s.stories.length, 0);
   const activeOpenStoryCount = scoped
     .flatMap((s) => s.stories)
     .filter((story) => story.state === "open").length;
@@ -93,6 +103,47 @@ export default async function ProjectStoriesPage({
           visibleStages.reduce((total, candidate) => total + candidate.stories.length, 0),
         )
       : null;
+
+  const boardBody = () => (
+    <div className="flex flex-col gap-6">
+      {visibleStages.map((s) => {
+        const stageItems = s.stories;
+        return (
+          <StageSection
+            key={s.key}
+            label={s.label}
+            sub={s.sub}
+            kind={s.kind}
+            total={stageItems.length}
+            liveCount={stageItems.filter((story) => story.runState === "live").length}
+            failedCount={
+              stageItems.filter(
+                (story) => story.runState === "failed" || story.ciState === "failure",
+              ).length
+            }
+            defaultOpen={activeStage !== null || s.key !== "shipped"}
+          >
+            {stageItems.length === 0 ? (
+              <p className="border border-(--line) px-5 py-3.5 text-[12.5px] text-(--dim)">
+                Nothing here right now.
+              </p>
+            ) : (
+              <div className="flex flex-col border border-(--line)">
+                {stageItems.map((story) => (
+                  <IssueRow
+                    key={story.key}
+                    projectId={projectId}
+                    story={story}
+                    canTrigger={canTrigger}
+                  />
+                ))}
+              </div>
+            )}
+          </StageSection>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -184,50 +235,31 @@ export default async function ProjectStoriesPage({
               : `Couldn't load stories — ${pipelineResult.message}`
           }
         />
+      ) : mineState.kind === "blocked" ? (
+        <ErrorNotice
+          message={`Couldn't apply the "mine" filter — couldn't confirm who you are (${mineState.reason}). Reload to try again.`}
+        />
+      ) : mineState.kind === "on" && items.length > 0 && scopedTotal === 0 ? (
+        <div className="flex flex-col items-start gap-3 border border-(--line) bg-(--bg-subtle) p-8">
+          <p className="max-w-lg text-sm leading-relaxed text-(--mut)">
+            Nothing is assigned to{" "}
+            <span className="font-mono text-[12.5px]">@{mineState.login}</span> right now. Stories
+            you're assigned to in GitHub will appear here after the next sync.
+          </p>
+          <Link
+            href={boardHref(projectId, { stage: activeStage, status: activeStatus })}
+            className="border border-(--line-strong) px-3 py-1.5 text-[12px] font-medium text-(--ink) transition-colors hover:bg-(--bg-subtle)"
+          >
+            show all stories
+          </Link>
+        </div>
       ) : items.length === 0 ? (
         <p className="max-w-lg text-sm leading-relaxed text-(--dim)">
           No active stories right now. Closed and merged stories leave Shipped after seven days;
           sync refreshes the GitHub mirror.
         </p>
       ) : (
-        <div className="flex flex-col gap-6">
-          {visibleStages.map((s) => {
-            const stageItems = s.stories;
-            return (
-              <StageSection
-                key={s.key}
-                label={s.label}
-                sub={s.sub}
-                kind={s.kind}
-                total={stageItems.length}
-                liveCount={stageItems.filter((story) => story.runState === "live").length}
-                failedCount={
-                  stageItems.filter(
-                    (story) => story.runState === "failed" || story.ciState === "failure",
-                  ).length
-                }
-                defaultOpen={activeStage !== null || s.key !== "shipped"}
-              >
-                {stageItems.length === 0 ? (
-                  <p className="border border-(--line) px-5 py-3.5 text-[12.5px] text-(--dim)">
-                    Nothing here right now.
-                  </p>
-                ) : (
-                  <div className="flex flex-col border border-(--line)">
-                    {stageItems.map((story) => (
-                      <IssueRow
-                        key={story.key}
-                        projectId={projectId}
-                        story={story}
-                        canTrigger={canTrigger}
-                      />
-                    ))}
-                  </div>
-                )}
-              </StageSection>
-            );
-          })}
-        </div>
+        boardBody()
       )}
     </div>
   );

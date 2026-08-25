@@ -127,15 +127,35 @@ export function ownedBy(assignees: string[], login: string | undefined): boolean
   return assignees.some((assignee) => assignee.toLowerCase() === target);
 }
 
+/** What the control plane said about the signed-in viewer. */
+export type MeOutcome =
+  | { ok: true; githubLogin: string | undefined }
+  | { ok: false; message: string };
+
 /**
- * Whether the mine filter should actually apply. It is inert — never on —
- * for a viewer with no GitHub login to match against, even if `?mine=1`
- * is already sitting in the URL (a shared link, a bookmark, browser
- * history), so such a viewer is never trapped on a board with every
- * story filtered out and no chip left to undo it.
+ * Why the mine filter is or isn't applied:
+ *
+ * - `off` — not requested, or requested by a viewer with no GitHub login to
+ *   match against (a shared link, a bookmark, browser history). Such a viewer
+ *   is never trapped on a board with every story filtered out and no chip
+ *   left to undo it.
+ * - `on` — requested and matchable; `login` is the identity to match.
+ * - `blocked` — requested, but the `/v1/me` request itself failed. This is
+ *   kept distinct from `off` on purpose: silently showing the unfiltered
+ *   board would read as "the filter found nothing", and dropping the
+ *   parameter from every chip URL would erase the reader's intent. The board
+ *   must say the identity check failed instead.
  */
-export function mineFilterOn(mine: string | undefined, login: string | undefined): boolean {
-  return mine === "1" && Boolean(login);
+export type MineFilterState =
+  | { kind: "off" }
+  | { kind: "on"; login: string }
+  | { kind: "blocked"; reason: string };
+
+export function mineFilterState(requested: string | undefined, me: MeOutcome): MineFilterState {
+  if (requested !== "1") return { kind: "off" };
+  if (!me.ok) return { kind: "blocked", reason: me.message };
+  if (!me.githubLogin) return { kind: "off" };
+  return { kind: "on", login: me.githubLogin };
 }
 
 export type StoryOwner = { login: string; extra: number };
