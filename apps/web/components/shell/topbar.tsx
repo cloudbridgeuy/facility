@@ -2,6 +2,7 @@ import { Avatar, PillTag } from "@facility/ui";
 import { SignOutButton } from "@/components/shell/sign-out";
 import { ProjectSwitcher } from "@/components/shell/switcher";
 import type { Me, Project } from "@/lib/api";
+import { principalAvatarSrc } from "@/lib/avatar-policy";
 import { avatarInitial } from "@/lib/pipeline";
 
 export function Topbar({
@@ -28,7 +29,7 @@ export function Topbar({
         >
           <Avatar
             size={20}
-            src={me.principal.avatarUrl ?? undefined}
+            src={principalAvatarSrc(me.principal.avatarUrl, me.principal.githubLogin) ?? undefined}
             initial={avatarInitial(me.principal.githubLogin ?? me.principal.email)}
           />
           {me.principal.githubLogin ? `@${me.principal.githubLogin}` : me.principal.email}

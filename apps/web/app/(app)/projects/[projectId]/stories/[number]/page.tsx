@@ -9,7 +9,8 @@ import { PullRequestLinks } from "@/components/story/pull-request-links";
 import { StoryTimeline } from "@/components/story/timeline";
 import { StoryTriggerButtons } from "@/components/story/trigger-buttons";
 import { api } from "@/lib/api";
-import { avatarInitial, avatarUrlFor, pipelineStories, storyOwner } from "@/lib/pipeline";
+import { avatarSrcFor } from "@/lib/avatar-policy";
+import { avatarInitial, pipelineStories, storyOwner } from "@/lib/pipeline";
 import {
   detachablePullRequests,
   linkableIssues,
@@ -170,7 +171,7 @@ export default async function StoryPage({
             <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-(--dim)">
               <Avatar
                 size={16}
-                src={avatarUrlFor(owner.login) ?? undefined}
+                src={avatarSrcFor(owner.login) ?? undefined}
                 initial={avatarInitial(owner.login)}
               />
               <span>

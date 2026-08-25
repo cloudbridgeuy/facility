@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { CiStatusLink } from "@/components/ci-status";
+import { avatarSrcFor } from "@/lib/avatar-policy";
 import type { PipelineStory } from "@/lib/pipeline";
-import { avatarInitial, avatarUrlFor, storyHref, storyOwner } from "@/lib/pipeline";
+import { avatarInitial, storyHref, storyOwner } from "@/lib/pipeline";
 
 function fmtAgo(iso: string | null) {
   if (!iso) return "—";
@@ -199,7 +200,7 @@ export function IssueRow({
           <span className="inline-flex items-center gap-1 font-mono text-[10.5px] text-(--dim)">
             <Avatar
               size={14}
-              src={avatarUrlFor(owner.login) ?? undefined}
+              src={avatarSrcFor(owner.login) ?? undefined}
               initial={avatarInitial(owner.login)}
             />
             <span>

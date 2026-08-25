@@ -160,6 +160,11 @@ order, and end-to-end verification.
 - Gateway reachable from sandboxes and CI only (it holds no read endpoints,
   but it is the money path).
 - Sandboxes on an isolated network segment; egress per profile.
+- Avatars never load from third-party hosts in the browser: they are proxied
+  through this deployment's `/api/avatars` routes, and the server-side fetch
+  carries no cookies or referrer. Set `NEXT_PUBLIC_FACILITY_AVATARS=off` to
+  draw initial letters only; a deployment whose server egress to GitHub is
+  firewalled degrades to letters on its own.
 - Backups: Postgres PITR + object-store lifecycle; audit retention per your
   compliance window.
 - Keep `node packages/cli/bin/facility.mjs doctor --url https://<api-host> --key

@@ -169,18 +169,8 @@ export function storyOwner(assignees: string[]): StoryOwner | null {
 }
 
 /**
- * GitHub serves an avatar for any login at this path, so no avatar URL has to
- * travel on the wire. It 302s to `avatars.githubusercontent.com`.
- *
- * `?size=40` rather than the 14–20 CSS px we draw at, so 2× displays stay sharp.
+ * The letter an avatar falls back to when there is no image to draw.
  */
-export function avatarUrlFor(login: string): string | null {
-  const trimmed = login.trim();
-  if (!trimmed) return null;
-  return `https://github.com/${encodeURIComponent(trimmed)}.png?size=40`;
-}
-
-/** The letter an avatar falls back to when there is no image to draw. */
 export function avatarInitial(value: string | null | undefined): string {
   const trimmed = (value ?? "").trim();
   // Spread, not `[0]`, so an astral first character survives intact.
