@@ -59,10 +59,10 @@ the variable-by-variable reference.
 
 ## Before you start
 
-Locally: Node.js 22 or newer, pnpm 11, Docker with `buildx`, Terraform, the AWS
-CLI, `jq`, and OpenSSL. Fresh AWS credentials — an old `.env` may carry an
-expired session token, so confirm with `aws sts get-caller-identity` before
-applying anything.
+Locally: Node.js 24 LTS, pnpm 11.20.0, Docker with `buildx`, Terraform, the AWS
+CLI, `jq`, and OpenSSL. Node.js 22 is also supported from 22.13.0. Fresh AWS
+credentials — an old `.env` may carry an expired session token, so confirm with
+`aws sts get-caller-identity` before applying anything.
 
 On GitHub: the App configured for both human OAuth and repository automation,
 then installed on the repositories you will automate, with its webhook
@@ -79,7 +79,8 @@ repositories, or webhook URL.
 
 ```bash
 git switch main && git pull --ff-only
-corepack enable && pnpm install --frozen-lockfile
+npm install --global pnpm@11.20.0
+pnpm install --frozen-lockfile
 
 export FACILITY_AWS_REGION=us-east-1
 export FACILITY_ENV="prod"
@@ -181,7 +182,13 @@ request to HTTPS; it never forwards plaintext traffic to a Facility service.
 Certificate-less testing retains direct HTTP forwarding.
 In that validation-only mode, the browser-to-CloudFront hop is HTTPS but the
 CloudFront-to-ALB hop is plaintext HTTP. Configure the ALB certificate for
-production transport confidentiality.
+production transport confidentiality. The module disables interactive MCP OAuth in this mode:
+the MCP listener remains available for validation with scoped `fak_` API keys, but neither the API
+nor MCP service receives `MCP_PUBLIC_URL`, and Facility injects no `FACILITY_OAUTH_ISSUER`,
+`FACILITY_OAUTH_JWKS`, or authorization-server advertisement. Do not send real credentials or
+workloads over this plaintext validation mode. Add ACM and apply the Terraform configuration before
+deploying OAuth-capable images; then reconnect every interactive client because the web-origin
+issuer and canonical `/mcp` audience invalidate legacy OAuth sessions.
 
 Protected previews use a dedicated AWS-assigned CloudFront HTTPS origin by
 default. Keep `preview_hostname = ""`; Terraform creates the distribution,

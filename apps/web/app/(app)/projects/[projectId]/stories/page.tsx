@@ -45,7 +45,11 @@ export default async function ProjectStoriesPage({
   searchParams: Promise<{ stage?: string; status?: string; mine?: string }>;
 }) {
   const [{ projectId }, { stage, status, mine }] = await Promise.all([params, searchParams]);
-  const [pipelineResult, meResult] = await Promise.all([api.pipeline(projectId), api.me()]);
+  const [pipelineResult, meResult, project] = await Promise.all([
+    api.pipeline(projectId),
+    api.me(),
+    api.project(projectId),
+  ]);
 
   if (!pipelineResult.ok && pipelineResult.offline) return <Offline />;
 
@@ -135,6 +139,9 @@ export default async function ProjectStoriesPage({
                     projectId={projectId}
                     story={story}
                     canTrigger={canTrigger}
+                    builderPlanRequired={
+                      !project.ok || project.data.builderPlanPolicy === "required"
+                    }
                   />
                 ))}
               </div>

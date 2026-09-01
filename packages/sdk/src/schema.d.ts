@@ -4374,6 +4374,8 @@ export interface operations {
                         slug: string;
                         description: string | null;
                         systemVersion: string;
+                        /** @enum {string} */
+                        builderPlanPolicy: "optional" | "required";
                         settings: {
                             [key: string]: unknown;
                         };
@@ -4475,6 +4477,8 @@ export interface operations {
                     name: string;
                     slug: string;
                     description?: string;
+                    /** @enum {string} */
+                    builderPlanPolicy?: "optional" | "required";
                     settings?: {
                         [key: string]: unknown;
                     };
@@ -4495,6 +4499,8 @@ export interface operations {
                         slug: string;
                         description: string | null;
                         systemVersion: string;
+                        /** @enum {string} */
+                        builderPlanPolicy: "optional" | "required";
                         settings: {
                             [key: string]: unknown;
                         };
@@ -4604,6 +4610,8 @@ export interface operations {
                         slug: string;
                         description: string | null;
                         systemVersion: string;
+                        /** @enum {string} */
+                        builderPlanPolicy: "optional" | "required";
                         settings: {
                             [key: string]: unknown;
                         };
@@ -4800,6 +4808,8 @@ export interface operations {
                     name?: string;
                     description?: string;
                     status?: string;
+                    /** @enum {string} */
+                    builderPlanPolicy?: "optional" | "required";
                     settings?: {
                         [key: string]: unknown;
                     };
@@ -4820,6 +4830,8 @@ export interface operations {
                         slug: string;
                         description: string | null;
                         systemVersion: string;
+                        /** @enum {string} */
+                        builderPlanPolicy: "optional" | "required";
                         settings: {
                             [key: string]: unknown;
                         };
@@ -6130,6 +6142,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -6295,6 +6308,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -6559,6 +6573,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -6809,6 +6824,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -6962,6 +6978,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -7113,6 +7130,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -7891,6 +7909,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -8945,6 +8964,13 @@ export interface operations {
                                 ghUpdatedAt: string | null;
                                 /** Format: date-time */
                                 closedAt: string | null;
+                                wsjf: {
+                                    value: number;
+                                    time: number;
+                                    risk: number;
+                                    effort: number;
+                                    score: number;
+                                } | null;
                                 /** @enum {string} */
                                 stageState: "ready_to_plan" | "needs_attention" | "in_progress" | "needs_review" | "ready_to_build" | "failed" | "draft_pr" | "checks_running" | "checks_failed" | "awaiting_review" | "shipped_recently";
                                 /** @enum {string|null} */
@@ -9239,6 +9265,13 @@ export interface operations {
                         ghUpdatedAt: string | null;
                         /** Format: date-time */
                         closedAt: string | null;
+                        wsjf: {
+                            value: number;
+                            time: number;
+                            risk: number;
+                            effort: number;
+                            score: number;
+                        } | null;
                         prs: {
                             number: number;
                             title: string;
@@ -9663,6 +9696,7 @@ export interface operations {
                         engineSessionId: string | null;
                         transcriptUri: string | null;
                         sessionStateUri: string | null;
+                        workspaceBaseSha: string | null;
                         error: string | null;
                         /** Format: date-time */
                         queuedAt: string;
@@ -12532,6 +12566,7 @@ export interface operations {
                             };
                             contextMd: string;
                             state: string;
+                            executionError?: string | null;
                             decidedBy: string | null;
                             /** Format: date-time */
                             decidedAt: string | null;
@@ -12554,6 +12589,7 @@ export interface operations {
                             };
                             contextMd: string;
                             state: string;
+                            executionError?: string | null;
                             decidedBy: string | null;
                             /** Format: date-time */
                             decidedAt: string | null;
@@ -12690,6 +12726,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;
@@ -12833,6 +12870,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;
@@ -12963,6 +13001,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;
@@ -13089,6 +13128,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;
@@ -13207,6 +13247,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;
@@ -17661,6 +17702,7 @@ export interface operations {
                         };
                         contextMd: string;
                         state: string;
+                        executionError?: string | null;
                         decidedBy: string | null;
                         /** Format: date-time */
                         decidedAt: string | null;

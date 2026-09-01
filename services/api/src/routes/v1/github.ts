@@ -6,15 +6,17 @@ import {
   ghPullRequests,
   githubInstallations,
   insertAuditEvent,
+  poTasks,
   proposals,
   repos,
   runEvents,
   runs,
   users,
 } from "@facility/db";
-import { and, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { assertBuilderPlanDispatch, withBuilderPlanPreflight } from "../../builder-plan-policy.js";
 import { ApiError, notFound } from "../../errors.js";
 import { createGithubClientFactory, type GithubClientFactory } from "../../github/client.js";
 import { createGithubClientForRepo, syncRepoFacilityConfig } from "../../github/kickstart.js";
@@ -202,6 +204,13 @@ const PipelinePullRequestSchema = z.object({
   mergedAt: DateValue.nullable(),
   closingIssues: z.array(z.number().int()),
 });
+const StoryWsjfSchema = z.object({
+  value: z.number(),
+  time: z.number(),
+  risk: z.number(),
+  effort: z.number(),
+  score: z.number(),
+});
 const PipelineStorySchema = z.object({
   key: z.string(),
   id: z.string(),
@@ -220,6 +229,7 @@ const PipelineStorySchema = z.object({
   ghCreatedAt: DateValue.nullable(),
   ghUpdatedAt: DateValue.nullable(),
   closedAt: DateValue.nullable(),
+  wsjf: StoryWsjfSchema.nullable(),
   stageState: PipelineStageStateSchema,
   runState: z.enum(["live", "failed"]).nullable(),
   currentRun: z
@@ -262,6 +272,7 @@ const StoryDetailSchema = z.object({
   ghCreatedAt: DateValue.nullable(),
   ghUpdatedAt: DateValue.nullable(),
   closedAt: DateValue.nullable(),
+  wsjf: StoryWsjfSchema.nullable(),
   prs: z.array(PipelinePullRequestSchema),
   ciState: z.enum(["pending", "success", "failure"]).nullable(),
   ciUrl: z.string().nullable(),
@@ -938,6 +949,15 @@ export async function registerGithubV1Routes(app: FastifyInstance, context: V1Ro
       // context that cannot be dispatched.
       const agent = await findAgentDef(db, p.orgId, projectId, body.agent);
       if (!agent) throw new ApiError(400, "agent_not_found", "Agent definition not found");
+      await assertBuilderPlanDispatch(db, {
+        orgId: p.orgId,
+        projectId,
+        mode: agent.name,
+        agentDefId: agent.id,
+        trigger: { type: "web_issue" },
+        actor: { type: p.type, id: p.id },
+        source: "web_issue_preflight",
+      });
       const githubFactory =
         app.githubClientFactory ??
         (config.githubAppId && config.githubAppPrivateKey
@@ -966,6 +986,7 @@ export async function registerGithubV1Routes(app: FastifyInstance, context: V1Ro
             number: githubIssue.number,
             title: githubIssue.title,
             body: githubIssue.body,
+            state: githubIssue.state,
             user: { login: githubIssue.user?.login },
             labels: githubIssue.labels ?? [],
             html_url: githubIssue.html_url,
@@ -974,30 +995,47 @@ export async function registerGithubV1Routes(app: FastifyInstance, context: V1Ro
         issueComments,
       );
       assertGithubRequestContextSize(issueRequest);
+      const trigger = {
+        type: "web_issue",
+        ...(p.githubLogin ? { githubLogin: p.githubLogin } : {}),
+        repo: { id: repo.id, owner: repo.owner, name: repo.name },
+        issue: { number },
+        request: issueRequest,
+      };
+      const gh = { owner: repo.owner, repo: repo.name, issueNumber: number };
       // No GitHub userCanWrite check: platform RBAC `runs:trigger` is the authority
       // for control-plane-originated dispatch.
       // No execution_lane gate: an explicit control-plane trigger is platform-lane intent.
       const run = (
-        await db
-          .insert(runs)
-          .values({
-            id: newId("run"),
+        await withBuilderPlanPreflight(
+          db,
+          {
             orgId: p.orgId,
             projectId,
-            agentDefId: agent.id,
             mode: body.agent,
-            engine: agent.engine,
-            trigger: {
-              type: "web_issue",
-              ...(p.githubLogin ? { githubLogin: p.githubLogin } : {}),
-              repo: { id: repo.id, owner: repo.owner, name: repo.name },
-              issue: { number },
-              request: issueRequest,
-            },
-            gh: { owner: repo.owner, repo: repo.name, issueNumber: number },
-            createdBy: { type: p.type, id: p.id },
-          })
-          .returning()
+            agentDefId: agent.id,
+            trigger,
+            gh,
+            actor: { type: p.type, id: p.id },
+            source: "web_issue",
+          },
+          (tx, admission) =>
+            tx
+              // builder-plan-preflight: rest_github_issue
+              .insert(runs)
+              .values({
+                id: newId("run"),
+                orgId: p.orgId,
+                projectId,
+                agentDefId: agent.id,
+                mode: admission.mode,
+                engine: agent.engine,
+                trigger,
+                gh,
+                createdBy: { type: p.type, id: p.id },
+              })
+              .returning(),
+        )
       )[0];
       if (!run) throw new ApiError(500, "insert_failed", "Could not create run");
       await db.insert(runEvents).values({
@@ -1053,7 +1091,7 @@ async function assembleProjectStories(
   projectId: string,
 ) {
   const shippedSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [issueRows, repoRows] = await Promise.all([
+  const [issueRows, repoRows, taskRows] = await Promise.all([
     db
       .select()
       .from(ghIssues)
@@ -1068,6 +1106,7 @@ async function assembleProjectStories(
       .select({ id: repos.id, owner: repos.owner, name: repos.name })
       .from(repos)
       .where(and(eq(repos.orgId, orgId), eq(repos.projectId, projectId))),
+    tasksForAssembly(db, orgId, projectId),
   ]);
   const linkedPullConditions: SQL[] = [];
   for (const repo of repoRows) {
@@ -1113,6 +1152,7 @@ async function assembleProjectStories(
     pullRequests: pullRows,
     repos: repoRows,
     runs: runRows,
+    tasks: taskRows,
   });
 }
 
@@ -1320,7 +1360,21 @@ async function assembleSelectedStories(
     pullRequests: pullRows,
     repos: repoRows,
     runs: runRows,
+    tasks: await tasksForAssembly(db, orgId, projectId),
   });
+}
+
+/**
+ * The trusted provenance behind story ranks: PO tasks Facility has mirrored to
+ * GitHub, newest first so the latest judgement for an issue wins. The issue
+ * body's `## Value` block is world-writable and never consulted for ordering.
+ */
+function tasksForAssembly(db: FastifyInstance["facilityDb"], orgId: string, projectId: string) {
+  return db
+    .select({ wsjf: poTasks.wsjf, gh: poTasks.gh })
+    .from(poTasks)
+    .where(and(eq(poTasks.orgId, orgId), eq(poTasks.projectId, projectId), isNotNull(poTasks.gh)))
+    .orderBy(desc(poTasks.updatedAt));
 }
 
 async function runsForAssembly(
