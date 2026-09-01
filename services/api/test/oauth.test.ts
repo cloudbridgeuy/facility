@@ -13,6 +13,11 @@ import { createLocalJWKSet, decodeJwt, exportJWK, generateKeyPair, SignJWT } fro
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp, mintSessionCookie } from "../src/app.js";
+import {
+  oauthBrowserOrigin,
+  oauthScopes,
+  oidcScopesForConsent,
+} from "../src/auth/authorization-server.js";
 import { pkceChallenge } from "../src/auth/identity-provider.js";
 import {
   AccessTokenError,
@@ -25,8 +30,8 @@ import type { AppConfig } from "../src/types.js";
 const databaseUrl =
   process.env.DATABASE_URL ?? "postgres://facility:facility@localhost:5461/facility_test";
 const masterKey = Buffer.alloc(32, 7).toString("base64");
-const issuer = "https://api.facility.test";
-const audience = "https://mcp.facility.test";
+const issuer = "https://facility.test";
+const audience = "https://mcp.facility.test/mcp";
 const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
 const privateJwk = { ...(await exportJWK(privateKey)), kid: "test-key", alg: "ES256", use: "sig" };
 const publicJwk = { ...(await exportJWK(publicKey)), kid: "test-key", alg: "ES256", use: "sig" };
@@ -36,12 +41,14 @@ const base: AppConfig = {
   databaseUrl,
   secretMasterKey: masterKey,
   port: 4400,
-  publicUrl: "http://localhost:4400",
+  publicUrl: "https://api.facility.test",
+  webUrl: issuer,
   sandboxApiUrl: "http://localhost:4400",
   sandboxGatewayUrl: "http://localhost:4410",
   gatewayUrl: "http://localhost:4410",
   sandboxRunnerImage: "facility-runner:dev",
   sandboxDriver: "docker",
+  authCallbackUrl: `${issuer}/api/auth/callback`,
   facilityInsecureDev: true,
   logLevel: "silent",
 };
@@ -107,6 +114,66 @@ describe("Facility OAuth access-token verification", () => {
   it("recognizes only three-segment JWT values", () => {
     expect(looksLikeJwt("a.b.c")).toBe(true);
     expect(looksLikeJwt("fak_test")).toBe(false);
+  });
+});
+
+describe("Facility OAuth browser-origin runtime guard", () => {
+  it("accepts an exact same-origin callback, including HTTP local development", () => {
+    expect(
+      oauthBrowserOrigin({
+        ...base,
+        publicUrl: "http://localhost:4400",
+        webUrl: "http://localhost:3400",
+        oauthIssuer: "http://localhost:3400",
+        authCallbackUrl: "http://localhost:3400/api/auth/callback",
+      }),
+    ).toBe("http://localhost:3400");
+  });
+
+  it.each([
+    ["web path", { webUrl: `${issuer}/app`, oauthIssuer: issuer }],
+    ["issuer path", { webUrl: issuer, oauthIssuer: `${issuer}/oauth` }],
+    ["issuer credentials", { webUrl: issuer, oauthIssuer: "https://user:secret@facility.test" }],
+    ["different issuer", { webUrl: issuer, oauthIssuer: "https://other.facility.test" }],
+  ])("rejects a non-canonical or mismatched %s at runtime", (_label, overrides) => {
+    expect(() => oauthBrowserOrigin({ ...base, ...overrides })).toThrow(
+      "Facility OAuth WEB_URL and issuer must be the same canonical HTTP(S) origin",
+    );
+  });
+
+  it.each([
+    `${issuer}/auth/callback`,
+    `${issuer}/api/auth/callback/`,
+    `${issuer}/api/auth/callback?tenant=one`,
+    `${issuer}/api/auth/callback#fragment`,
+    "https://other.facility.test/api/auth/callback",
+    "https://user:secret@facility.test/api/auth/callback",
+  ])("rejects a non-exact authentication callback at runtime: %s", (authCallbackUrl) => {
+    expect(() =>
+      oauthBrowserOrigin({
+        ...base,
+        oauthIssuer: issuer,
+        authCallbackUrl,
+      }),
+    ).toThrow("Facility OAuth authentication callback must be exactly WEB_URL /api/auth/callback");
+  });
+});
+
+describe("Facility OAuth consent scopes", () => {
+  it("grants every requested advertised OIDC scope in canonical order", () => {
+    expect(oidcScopesForConsent(oauthScopes("profile openid email offline_access"))).toBe(
+      "openid offline_access email profile",
+    );
+  });
+
+  it("does not promote resource or unknown scopes into the OIDC grant", () => {
+    expect(oidcScopesForConsent(oauthScopes("openid facility:mcp projects:write unknown"))).toBe(
+      "openid",
+    );
+  });
+
+  it.each([undefined, null, 42, ["openid"]])("handles a non-string scope value: %j", (scope) => {
+    expect(oauthScopes(scope)).toEqual(new Set());
   });
 });
 
@@ -194,6 +261,8 @@ describe("Facility OAuth resource-server integration", async () => {
       token_endpoint: `${issuer}/oauth/token`,
       registration_endpoint: `${issuer}/oauth/register`,
       code_challenge_methods_supported: ["S256"],
+      scopes_supported: ["openid", "offline_access", "email", "profile", "facility:mcp"],
+      authorization_response_iss_parameter_supported: true,
     });
     const poisonedMetadata = await app.inject({
       method: "GET",
@@ -224,14 +293,31 @@ describe("Facility OAuth resource-server integration", async () => {
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        scope: "openid offline_access email profile facility:mcp",
       },
     });
     expect(registration.statusCode, registration.body).toBe(201);
     expect(registration.json()).toMatchObject({
       client_name: "Facility MCP test",
       token_endpoint_auth_method: "none",
+      scope: "openid offline_access email profile facility:mcp",
     });
     expect(registration.json().client_secret).toBeUndefined();
+    const rejectedRegistration = await app.inject({
+      method: "POST",
+      url: "/oauth/register",
+      headers: proxyHeaders,
+      payload: {
+        client_name: "Invalid scope client",
+        redirect_uris: ["http://127.0.0.1:32123/callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid facility:unknown",
+      },
+    });
+    expect(rejectedRegistration.statusCode).toBe(400);
+    expect(rejectedRegistration.json()).toMatchObject({ error: "invalid_client_metadata" });
   });
 
   it("resolves a current member and rejects cross-tenant claims", async () => {
@@ -279,57 +365,30 @@ describe("Facility OAuth resource-server integration", async () => {
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: "code",
-      scope: "openid offline_access facility:mcp",
+      scope: "openid offline_access email profile facility:mcp",
       resource: audience,
       state: "oauth-state",
       code_challenge: await pkceChallenge(verifier),
       code_challenge_method: "S256",
     });
-    const authorization = await app.inject({
+    const wrongResource = new URLSearchParams(query);
+    wrongResource.set("resource", "https://mcp.facility.test");
+    const rejectedResource = await app.inject({
       method: "GET",
-      url: `/oauth/authorize?${query}`,
+      url: `/oauth/authorize?${wrongResource}`,
       headers: proxyHeaders,
     });
-    expect(authorization.statusCode).toBe(303);
-    const providerCookies = authorization.cookies.map((cookie) => `${cookie.name}=${cookie.value}`);
-    const interactionPath = new URL(
-      required(authorization.headers.location, "interaction redirect"),
-      config.publicUrl,
-    ).pathname;
-    const facilityCookie = `facility_session=${await mintSessionCookie(config, userId, orgId)}`;
-    const interaction = await app.inject({
-      method: "GET",
-      url: interactionPath,
-      headers: { cookie: [facilityCookie, ...providerCookies].join("; ") },
+    expect(rejectedResource.statusCode).toBe(400);
+    expect(rejectedResource.body).toContain("Unknown OAuth resource");
+
+    const code = await completePkceConsent({
+      app,
+      config,
+      userId,
+      orgId,
+      proxyHeaders,
+      query,
     });
-    expect(interaction.statusCode).toBe(200);
-    expect(interaction.body).toContain("Authorize Facility MCP");
-    expect(interaction.body).toContain(redirectUri);
-    const consent = await app.inject({
-      method: "POST",
-      url: interactionPath,
-      headers: {
-        ...proxyHeaders,
-        cookie: [facilityCookie, ...providerCookies].join("; "),
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      payload: "confirm=yes",
-    });
-    expect(consent.statusCode).toBe(303);
-    const resumedCookies = [
-      ...providerCookies,
-      ...consent.cookies.map((cookie) => `${cookie.name}=${cookie.value}`),
-    ];
-    const consentLocation = required(consent.headers.location, "consent redirect");
-    const resumed = await app.inject({
-      method: "GET",
-      url: new URL(consentLocation, issuer).pathname + new URL(consentLocation, issuer).search,
-      headers: { ...proxyHeaders, cookie: resumedCookies.join("; ") },
-    });
-    expect(resumed.statusCode).toBe(303);
-    const callback = new URL(required(resumed.headers.location, "OAuth callback redirect"));
-    expect(callback.searchParams.get("state")).toBe("oauth-state");
-    const code = required(callback.searchParams.get("code"), "authorization code");
     const exchange = await tokenRequest(app, proxyHeaders, {
       grant_type: "authorization_code",
       client_id: clientId,
@@ -342,6 +401,7 @@ describe("Facility OAuth resource-server integration", async () => {
     const first = exchange.json();
     expect(first.access_token.split(".")).toHaveLength(3);
     expect(first.refresh_token).toBeTypeOf("string");
+    expect(decodeJwt(first.access_token).scope).toBe("facility:mcp");
     const persisted = JSON.stringify(await db.select().from(oauthArtifacts));
     expect(persisted).not.toContain(first.refresh_token);
     expect(persisted).not.toContain(first.access_token);
@@ -362,7 +422,15 @@ describe("Facility OAuth resource-server integration", async () => {
       resource: audience,
     });
     expect(rotated.statusCode, rotated.body).toBe(200);
-    expect(rotated.json().refresh_token).not.toBe(first.refresh_token);
+    const rotatedBody = rotated.json();
+    expect(rotatedBody.refresh_token).not.toBe(first.refresh_token);
+    expect(decodeJwt(rotatedBody.access_token).scope).toBe("facility:mcp");
+    const refreshedMe = await app.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: `Bearer ${rotatedBody.access_token}` },
+    });
+    expect(refreshedMe.statusCode, refreshedMe.body).toBe(200);
     const replay = await tokenRequest(app, proxyHeaders, {
       grant_type: "refresh_token",
       client_id: clientId,
@@ -372,7 +440,222 @@ describe("Facility OAuth resource-server integration", async () => {
     expect(replay.statusCode).toBe(400);
     expect(replay.json().error).toBe("invalid_grant");
   });
+
+  it("does not grant MCP access when the client omits the MCP scope", async () => {
+    const proxyHeaders = {
+      host: "api.facility.test",
+      "x-forwarded-host": "api.facility.test",
+      "x-forwarded-proto": "https",
+    };
+    const redirectUri = "http://127.0.0.1:32125/callback";
+    const registration = await app.inject({
+      method: "POST",
+      url: "/oauth/register",
+      headers: proxyHeaders,
+      payload: {
+        client_name: "OIDC-only regression client",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: "openid offline_access email",
+      },
+    });
+    expect(registration.statusCode, registration.body).toBe(201);
+    const clientId = registration.json().client_id as string;
+    const verifier = "oidc-only-pkce-verifier-".padEnd(64, "x");
+    const query = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid offline_access email",
+      resource: audience,
+      state: "oidc-only-state",
+      code_challenge: await pkceChallenge(verifier),
+      code_challenge_method: "S256",
+    });
+    const code = await completePkceConsent({
+      app,
+      config,
+      userId,
+      orgId,
+      proxyHeaders,
+      query,
+    });
+    const exchange = await tokenRequest(app, proxyHeaders, {
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+      resource: audience,
+    });
+    expect(exchange.statusCode, exchange.body).toBe(200);
+    const first = exchange.json();
+    expect(first.refresh_token).toBeTypeOf("string");
+    await expectMcpAccessDenied(app, first.access_token, { userId, orgId });
+
+    const rotated = await tokenRequest(app, proxyHeaders, {
+      grant_type: "refresh_token",
+      client_id: clientId,
+      refresh_token: first.refresh_token,
+      resource: audience,
+    });
+    expect(rotated.statusCode, rotated.body).toBe(200);
+    await expectMcpAccessDenied(app, rotated.json().access_token, { userId, orgId });
+  });
+
+  it("does not grant MCP access when the authorization request omits scope", async () => {
+    const proxyHeaders = {
+      host: "api.facility.test",
+      "x-forwarded-host": "api.facility.test",
+      "x-forwarded-proto": "https",
+    };
+    const redirectUri = "http://127.0.0.1:32126/callback";
+    const registration = await app.inject({
+      method: "POST",
+      url: "/oauth/register",
+      headers: proxyHeaders,
+      payload: {
+        client_name: "Scope-less regression client",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+      },
+    });
+    expect(registration.statusCode, registration.body).toBe(201);
+    const clientId = registration.json().client_id as string;
+    const verifier = "scope-less-pkce-verifier-".padEnd(64, "x");
+    const query = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      resource: audience,
+      state: "scope-less-state",
+      code_challenge: await pkceChallenge(verifier),
+      code_challenge_method: "S256",
+    });
+    const callback = await completePkceConsentCallback({
+      app,
+      config,
+      userId,
+      orgId,
+      proxyHeaders,
+      query,
+    });
+    expect(callback.searchParams.get("error"), callback.toString()).toBe("access_denied");
+    expect(callback.searchParams.get("code")).toBeNull();
+  });
 });
+
+async function expectMcpAccessDenied(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  accessToken: string,
+  expected: { userId: string; orgId: string },
+) {
+  const claims = decodeJwt(accessToken);
+  expect(claims).toMatchObject({
+    iss: issuer,
+    aud: audience,
+    sub: expected.userId,
+    org_id: expected.orgId,
+  });
+  expect(claims.scope).toBeUndefined();
+  await expect(verifyAccessToken(accessToken, oauthConfig)).rejects.toBeInstanceOf(
+    AccessTokenError,
+  );
+  const denied = await app.inject({
+    method: "GET",
+    url: "/v1/me",
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  expect(denied.statusCode).toBe(401);
+  expect(denied.json()).toEqual({
+    error: { code: "unauthorized", message: "Invalid access token" },
+  });
+}
+
+type PkceConsentInput = {
+  app: Awaited<ReturnType<typeof buildApp>>;
+  config: AppConfig;
+  userId: string;
+  orgId: string;
+  proxyHeaders: Record<string, string>;
+  query: URLSearchParams;
+};
+
+async function completePkceConsent(input: PkceConsentInput) {
+  const callback = await completePkceConsentCallback(input);
+  return required(callback.searchParams.get("code"), "authorization code");
+}
+
+async function completePkceConsentCallback(input: PkceConsentInput) {
+  const redirectUri = required(input.query.get("redirect_uri"), "redirect URI");
+  const state = required(input.query.get("state"), "OAuth state");
+  const authorization = await input.app.inject({
+    method: "GET",
+    url: `/oauth/authorize?${input.query}`,
+    headers: input.proxyHeaders,
+  });
+  expect(authorization.statusCode).toBe(303);
+  const providerCookies = authorization.cookies.map((cookie) => `${cookie.name}=${cookie.value}`);
+  const interactionUrl = new URL(
+    required(authorization.headers.location, "interaction redirect"),
+    input.config.publicUrl,
+  );
+  expect(interactionUrl.origin).toBe(issuer);
+  const interactionPath = interactionUrl.pathname;
+  const signedOutInteraction = await input.app.inject({
+    method: "GET",
+    url: interactionPath,
+    headers: { cookie: providerCookies.join("; ") },
+  });
+  expect(signedOutInteraction.statusCode).toBe(302);
+  expect(signedOutInteraction.headers.location).toBe(
+    `${issuer}/api/auth/login?returnTo=${encodeURIComponent(interactionPath)}`,
+  );
+  const facilityCookie = `facility_session=${await mintSessionCookie(
+    input.config,
+    input.userId,
+    input.orgId,
+  )}`;
+  const interaction = await input.app.inject({
+    method: "GET",
+    url: interactionPath,
+    headers: { cookie: [facilityCookie, ...providerCookies].join("; ") },
+  });
+  expect(interaction.statusCode).toBe(200);
+  expect(interaction.body).toContain("Authorize Facility MCP");
+  expect(interaction.body).toContain(redirectUri);
+  const consent = await input.app.inject({
+    method: "POST",
+    url: interactionPath,
+    headers: {
+      ...input.proxyHeaders,
+      cookie: [facilityCookie, ...providerCookies].join("; "),
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    payload: "confirm=yes",
+  });
+  expect(consent.statusCode).toBe(303);
+  const resumedCookies = [
+    ...providerCookies,
+    ...consent.cookies.map((cookie) => `${cookie.name}=${cookie.value}`),
+  ];
+  const consentLocation = required(consent.headers.location, "consent redirect");
+  const resumedUrl = new URL(consentLocation, issuer);
+  const resumed = await input.app.inject({
+    method: "GET",
+    url: resumedUrl.pathname + resumedUrl.search,
+    headers: { ...input.proxyHeaders, cookie: resumedCookies.join("; ") },
+  });
+  expect(resumed.statusCode).toBe(303);
+  const callback = new URL(required(resumed.headers.location, "OAuth callback redirect"));
+  expect(callback.searchParams.get("iss")).toBe(issuer);
+  expect(callback.searchParams.get("state")).toBe(state);
+  return callback;
+}
 
 function tokenRequest(
   app: Awaited<ReturnType<typeof buildApp>>,
