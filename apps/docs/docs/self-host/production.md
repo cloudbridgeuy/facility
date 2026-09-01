@@ -165,6 +165,12 @@ order, and end-to-end verification.
   carries no cookies or referrer. Set `NEXT_PUBLIC_FACILITY_AVATARS=off` to
   draw initial letters only; a deployment whose server egress to GitHub is
   firewalled degrades to letters on its own.
+- The avatar routes need a session the control plane recognises, so nobody who
+  can merely reach the deployment can make it call GitHub. Answers are cached
+  in the web process, and each signed-in viewer has a ceiling on how many
+  avatars they can make it fetch, so the traffic those routes send to GitHub
+  is bounded by the people who have accounts rather than by request volume.
+  Both bounds are per web process; run more than one and each holds its own.
 - Backups: Postgres PITR + object-store lifecycle; audit retention per your
   compliance window.
 - Keep `node packages/cli/bin/facility.mjs doctor --url https://<api-host> --key
